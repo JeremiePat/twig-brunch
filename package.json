@@ -1,0 +1,16 @@
+{
+  "name": "twig-brunch",
+  "version": "0.0.1",
+  "description": "Plugin to build static HTML from twig templates with Brunch",
+  "main": "main.js",
+  "author": "Jeremie Patonnier",
+  "license": "MIT",
+  "devDependencies": {
+    "twig": "^0.8.2"
+  },
+  "dependencies": {
+    "loggy": "^0.2.2",
+    "progeny": "^0.5.2",
+    "umd-wrapper": "^0.1.0"
+  }
+}
