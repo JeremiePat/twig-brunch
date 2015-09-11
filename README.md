@@ -4,14 +4,12 @@ Add [Twig](https://github.com/justjohn/twig.js) support to [brunch](http://brunc
 
 ## Usage
 
-Install the plugin via npm with `npm install --save twig-brunch`.
+~~Install the plugin via npm with `npm install --save twig-brunch`.~~ (_Not yet_)
 
 Or, do manual install:
 
-* Add `"handlebars-brunch": "x.y.z"` to `package.json` of your brunch app.
-  Pick a plugin version that corresponds to your minor (y) brunch version.
 * If you want to use git version of plugin, add
-`"handlebars-brunch": "git+https://github.com/brunch/handlebars-brunch.git"`.
+`"twig-brunch": "git+https://github.com/JeremiePat/twig-brunch.git"`.
 
 ### Options
 If customization is needed or desired, settings can be modified in your brunch
