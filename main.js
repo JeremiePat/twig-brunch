@@ -4,11 +4,12 @@ var DEFAULT_EXTENSION = 'twig';
 
 var sysPath = require('path');
 var fs      = require('fs');
-var log     = require('loggy');
+var loggy   = require('loggy');
 var progeny = require('progeny');
 var umd     = require('umd-wrapper');
 var Twig    = require('twig');
 
+// Tweak Twig to allow override of templates
 Twig.extend(function (t) {
   Twig.unregister = function (id) {
     if (t.Templates.registry[id]) {
@@ -17,8 +18,51 @@ Twig.extend(function (t) {
   };
 });
 
-// Make sure any extention provide by the user is allways a RegExp
-function normalizeExtension(ext) {
+
+// UTIL FUNCTIONS
+// ----------------------------------------------------------------------------
+
+/// Read JSON data form a file
+ //
+ // @param path2JSON The path to the JSON file to read
+ // @return Promise
+function readJson(path2JSON) {
+  return new Promise(function (resolve, reject) {
+    fs.readFile(path2JSON, 'utf-8', function (err, data) {
+      if (err) {
+        reject(err);
+        loggy.warn('Unable to read', path2JSON);
+
+        return;
+      }
+
+      resolve(JSON.parse(data));
+    });
+  });
+}
+
+/// Write content into a file
+ //
+ // @param file    The path to the file to create or override
+ // @param content The content of the file to write
+ // @return Promise
+function writeFile(file, content) {
+  return new Promise(function (resolve, reject) {
+    fs.writeFile(file, content, function (err) {
+      if (err) {
+        reject(err);
+        loggy.error('Unable to write in', file);
+
+        return;
+      }
+
+      resolve(content);
+    });
+  });
+}
+
+// Turn any extention provide by the user into a RegExp
+function RGXExtension(ext) {
   if (ext instanceof RegExp) {
     return ext;
   }
@@ -39,6 +83,7 @@ function normalizeExtension(ext) {
 }
 
 function setPathToHtml(twigFilePath, assetPath) {
+  // We assume the path to the twig file is provided WITHOUT extension
   var path = twigFilePath + '.html';
   path = path.split(sysPath.sep);
 
@@ -58,66 +103,55 @@ function setPathToHtml(twigFilePath, assetPath) {
   return sysPath.join(dest, path);
 }
 
-function getData(dataSrc) {
-  return new Promise(function (resolve, reject) {
-    fs.readFile(dataSrc, 'utf-8', function (err, data) {
-      if (err) {
-        reject(err);
-
-        if (dataSrc) {
-          log.warn('TwigCompiler was unable to get data from', dataSrc);
-        }
-
-        return;
-      }
-
-      resolve(JSON.parse(data));
-    });
-  });
-}
-
-function writeFile(dest, content) {
-  return new Promise(function (resolve, reject) {
-    fs.writeFile(dest, content, function (err) {
-      if (err) {
-        reject(err);
-
-        log.error('TwigCompiler is unable to write in', dest);
-
-        return;
-      }
-
-      resolve();
-    });
-  });
-}
-
+/// Turn the template "id" into HTML at "path" with data from "dataSrc"
+ //
+ // @param id      The id of the template to process
+ // @param path    The repository where to create the resulting HTML file
+ // @param dataSrc The path to the json file with the data to use
 function twig2html(id, path, dataSrc) {
   function processTemplate(data) {
     if (data instanceof Error) {
       data = {};
+      loggy.warn(Error);
     }
 
     var content = Twig.twig({ref: id}).render(data);
     var dest    = setPathToHtml(id, path);
 
-    writeFile(dest, content);
+    writeFile(dest, content)
+      .then(function () {
+        loggy.info('File created', dest);
+      });
   }
 
-  return getData(dataSrc)
+  return readJson(dataSrc)
     .then(processTemplate)
     .catch(processTemplate);
 }
 
+
+// BRUNCH PLUGIN
+// ----------------------------------------------------------------------------
+
 function TwigCompiler(cfg) {
   if (cfg == null) { cfg = {}; }
   var config = (cfg.plugins && cfg.plugins.twig) || {};
-  // console.log(cfg);
-  this.optimize   = cfg.optimize;
-  this.pattern    = normalizeExtension(config.extension);
-  this.staticDir  = config.staticDir;
-  this.staticData = config.staticData;
 
+  // remin to optimize if possible
+  this.optimize = cfg.optimize;
+
+  // Setup actual extention file to check
+  this.pattern = RGXExtension(config.extension);
+
+  if (config.static) {
+    // For static generation, set output directory
+    this.directory = config.static.directory || 'app/assets';
+
+    // For static generation, set data source
+    this.data = String(config.static.data || config.static);
+  }
+
+  // Set up the dependency tree for brunch
   this.getDependencies = progeny({
     extension     : this.extension,
     extensionsList: [this.extension, 'twig'],
@@ -143,12 +177,14 @@ TwigCompiler.prototype.compile = function processTwig(raw, path, callback) {
              .replace(/[\r\n]*$/, '\n');
   }
 
+  // Compile twig template
   var id = path.replace(this.pattern, '');
   Twig.unregister(id);
 
   var tpl = Twig.twig({
-    id  : id,
-    data: raw
+    id   : id,
+    path : path,
+    async: false
   });
 
   var result = [
@@ -163,39 +199,12 @@ TwigCompiler.prototype.compile = function processTwig(raw, path, callback) {
     '}())'
   ].join('\n');
 
+  // Create static HTML if necessary
+  if (this.directory && id.indexOf('_') !== 0) {
+    twig2html(id, this.directory, this.data);
+  }
+
   return callback(null, umd(result));
-};
-
-TwigCompiler.prototype.onCompile = function processStaticTwig(generatedFiles) {
-  var ext  = this.pattern;
-  var dest = this.staticDir;
-  var data = this.staticData;
-
-  var nbrTwigFiles = 0;
-  var nbrHtmlFiles = 0;
-
-  function fileIterator(file) {
-    if (file.sourceFiles) {
-      file.sourceFiles.forEach(fileIterator);
-    }
-
-    if (file.path && ext.test(file.path)) {
-      var filename = file.path.split(sysPath.sep).pop();
-      nbrTwigFiles += 1;
-
-      if (filename.indexOf('_') !== 0) {
-        nbrHtmlFiles += 1;
-
-        var id = file.path.replace(ext, '');
-        twig2html(id, dest, data);
-      }
-    }
-  }
-
-  if (dest) {
-    generatedFiles.forEach(fileIterator); // This is asynchonous in there
-    log.info('process', nbrTwigFiles, 'twig files into', nbrHtmlFiles, 'HTML files');
-  }
 };
 
 module.exports = TwigCompiler;
